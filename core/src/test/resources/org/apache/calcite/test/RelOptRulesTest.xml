@@ -134,6 +134,42 @@ LogicalProject(SAL=[$5])
 ]]>
         </Resource>
     </TestCase>
+    <TestCase name="testReduceCurrentTimestamp">
+        <Resource name="sql">
+            <![CDATA[select sal, current_timestamp from emp]]>
+        </Resource>
+        <Resource name="planAfter">
+            <![CDATA[
+LogicalProject(SAL=[$5], T=[CURRENT_TIMESTAMP])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+        <Resource name="planBefore">
+            <![CDATA[
+LogicalProject(SAL=[$5], T=[CURRENT_TIMESTAMP])
+  LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
+    <TestCase name="testReduceCurrentTimestampWithProject">
+        <Resource name="sql">
+            <![CDATA[select sal, current_timestamp from emp]]>
+        </Resource>
+        <Resource name="planAfter">
+            <![CDATA[
+LogicalProject(SAL=[$0], EXPR$1=[+($0, 5)], T=[CURRENT_TIMESTAMP])
+  LogicalProject(SAL=[$5], T=[CURRENT_TIMESTAMP])
+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+        <Resource name="planBefore">
+            <![CDATA[
+LogicalProject(SAL=[$0], EXPR$1=[+($0, 5)], T=[$1])
+  LogicalProject(SAL=[$5], T=[CURRENT_TIMESTAMP])
+    LogicalTableScan(table=[[CATALOG, SALES, EMP]])
+]]>
+        </Resource>
+    </TestCase>
     <TestCase name="testReduceOrCaseWhen">
         <Resource name="sql">
             <![CDATA[select sal

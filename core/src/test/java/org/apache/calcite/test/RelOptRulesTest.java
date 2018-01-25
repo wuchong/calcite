@@ -16,6 +16,10 @@
  */
 package org.apache.calcite.test;
 
+import com.google.common.collect.ImmutableMap;
+import org.apache.calcite.DataContext;
+import org.apache.calcite.adapter.java.JavaTypeFactory;
+import org.apache.calcite.linq4j.QueryProvider;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptUtil;
@@ -44,63 +48,14 @@ import org.apache.calcite.rel.metadata.CachingRelMetadataProvider;
 import org.apache.calcite.rel.metadata.ChainedRelMetadataProvider;
 import org.apache.calcite.rel.metadata.DefaultRelMetadataProvider;
 import org.apache.calcite.rel.metadata.RelMetadataProvider;
-import org.apache.calcite.rel.rules.AggregateExpandDistinctAggregatesRule;
-import org.apache.calcite.rel.rules.AggregateExtractProjectRule;
-import org.apache.calcite.rel.rules.AggregateFilterTransposeRule;
-import org.apache.calcite.rel.rules.AggregateJoinTransposeRule;
-import org.apache.calcite.rel.rules.AggregateProjectMergeRule;
-import org.apache.calcite.rel.rules.AggregateProjectPullUpConstantsRule;
-import org.apache.calcite.rel.rules.AggregateReduceFunctionsRule;
-import org.apache.calcite.rel.rules.AggregateUnionAggregateRule;
-import org.apache.calcite.rel.rules.AggregateUnionTransposeRule;
-import org.apache.calcite.rel.rules.AggregateValuesRule;
-import org.apache.calcite.rel.rules.CalcMergeRule;
-import org.apache.calcite.rel.rules.CoerceInputsRule;
-import org.apache.calcite.rel.rules.DateRangeRules;
-import org.apache.calcite.rel.rules.FilterAggregateTransposeRule;
-import org.apache.calcite.rel.rules.FilterJoinRule;
-import org.apache.calcite.rel.rules.FilterMergeRule;
-import org.apache.calcite.rel.rules.FilterProjectTransposeRule;
-import org.apache.calcite.rel.rules.FilterSetOpTransposeRule;
-import org.apache.calcite.rel.rules.FilterToCalcRule;
-import org.apache.calcite.rel.rules.IntersectToDistinctRule;
-import org.apache.calcite.rel.rules.JoinAddRedundantSemiJoinRule;
-import org.apache.calcite.rel.rules.JoinCommuteRule;
-import org.apache.calcite.rel.rules.JoinExtractFilterRule;
-import org.apache.calcite.rel.rules.JoinProjectTransposeRule;
-import org.apache.calcite.rel.rules.JoinPushExpressionsRule;
-import org.apache.calcite.rel.rules.JoinPushTransitivePredicatesRule;
-import org.apache.calcite.rel.rules.JoinToMultiJoinRule;
-import org.apache.calcite.rel.rules.JoinUnionTransposeRule;
-import org.apache.calcite.rel.rules.ProjectFilterTransposeRule;
-import org.apache.calcite.rel.rules.ProjectJoinTransposeRule;
-import org.apache.calcite.rel.rules.ProjectMergeRule;
-import org.apache.calcite.rel.rules.ProjectRemoveRule;
-import org.apache.calcite.rel.rules.ProjectSetOpTransposeRule;
-import org.apache.calcite.rel.rules.ProjectToCalcRule;
-import org.apache.calcite.rel.rules.ProjectToWindowRule;
-import org.apache.calcite.rel.rules.ProjectWindowTransposeRule;
-import org.apache.calcite.rel.rules.PruneEmptyRules;
-import org.apache.calcite.rel.rules.ReduceExpressionsRule;
-import org.apache.calcite.rel.rules.SemiJoinFilterTransposeRule;
-import org.apache.calcite.rel.rules.SemiJoinJoinTransposeRule;
-import org.apache.calcite.rel.rules.SemiJoinProjectTransposeRule;
-import org.apache.calcite.rel.rules.SemiJoinRemoveRule;
-import org.apache.calcite.rel.rules.SemiJoinRule;
-import org.apache.calcite.rel.rules.SortJoinTransposeRule;
-import org.apache.calcite.rel.rules.SortProjectTransposeRule;
-import org.apache.calcite.rel.rules.SortUnionTransposeRule;
-import org.apache.calcite.rel.rules.SubQueryRemoveRule;
-import org.apache.calcite.rel.rules.TableScanRule;
-import org.apache.calcite.rel.rules.UnionMergeRule;
-import org.apache.calcite.rel.rules.UnionPullUpConstantsRule;
-import org.apache.calcite.rel.rules.UnionToDistinctRule;
-import org.apache.calcite.rel.rules.ValuesReduceRule;
+import org.apache.calcite.rel.rules.*;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rex.RexExecutorImpl;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.runtime.Hook;
 import org.apache.calcite.runtime.PredicateImpl;
+import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlValidator;
@@ -119,6 +74,7 @@ import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.TimeZone;
 
 import javax.annotation.Nullable;
 
@@ -200,6 +156,64 @@ public class RelOptRulesTest extends RelOptTestBase {
             + "where case when (sal = 1000) then\n"
             + "(case when sal = 1000 then null else 1 end is null) else\n"
             + "(case when sal = 2000 then null else 1 end is null) end is true";
+    checkPlanning(tester, preProgram, hepPlanner, sql);
+  }
+
+  private static class DummyTestDataContext implements DataContext {
+    private final ImmutableMap<String, Object> map;
+
+    DummyTestDataContext() {
+      this.map =
+          ImmutableMap.<String, Object>of(
+              Variable.CURRENT_TIMESTAMP.camelName, 1311120000000L);
+    }
+
+    public SchemaPlus getRootSchema() {
+      return null;
+    }
+
+    public JavaTypeFactory getTypeFactory() {
+      return null;
+    }
+
+    public QueryProvider getQueryProvider() {
+      return null;
+    }
+
+    public Object get(String name) {
+      return map.get(name);
+    }
+  }
+
+  @Test public void testReduceCurrentTimestamp() {
+    HepProgram preProgram = new HepProgramBuilder()
+        .build();
+
+    HepProgramBuilder builder = new HepProgramBuilder();
+    builder.addRuleClass(ReduceExpressionsRule.class);
+    HepPlanner hepPlanner = new HepPlanner(builder.build());
+    hepPlanner.addRule(ReduceExpressionsRule.PROJECT_INSTANCE);
+
+    RexExecutorImpl executor = new RexExecutorImpl(new DummyTestDataContext());
+    ((TesterImpl) tester).getPlanner().setExecutor(executor);
+
+    final String sql = "select sal, current_timestamp as t from emp";
+    checkPlanning(tester, preProgram, hepPlanner, sql, true);
+  }
+
+  @Test public void testReduceCurrentTimestampWithProject() {
+    HepProgram preProgram = new HepProgramBuilder()
+        .build();
+
+    HepProgramBuilder builder = new HepProgramBuilder();
+    builder.addRuleClass(ReduceExpressionsRule.class);
+    HepPlanner hepPlanner = new HepPlanner(builder.build());
+    hepPlanner.addRule(ReduceExpressionsRule.PROJECT_INSTANCE);
+
+    RexExecutorImpl executor = new RexExecutorImpl(new DummyTestDataContext());
+    ((TesterImpl) tester).getPlanner().setExecutor(executor);
+
+    final String sql = "select sal, sal + 5, t from (select sal, current_timestamp as t from emp)";
     checkPlanning(tester, preProgram, hepPlanner, sql);
   }
 
